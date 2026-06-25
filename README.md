@@ -47,9 +47,51 @@ visionretain/
 
 ## ⚡ Quick Start (Local Dev)
 
-### Option A — Frontend only (no backend needed)
+### Product Lens setup
 
-The React app uses the **Anthropic API directly from the browser** for AI features (Product Lens, Copilot, Sentiment, Reports). All other modules use realistic mock data.
+Product Lens now calls the FastAPI backend. It does not expose AI or shopping
+provider secrets in the browser and does not substitute mock products or prices.
+
+```bash
+cp .env.example .env
+# Add your rotated Supabase secret, Gemini API key, and SerpApi key.
+
+# Run supabase/schema.sql once in the Supabase SQL editor.
+npm run dev
+./start_all.sh
+```
+
+`GEMINI_API_KEY` identifies visible objects and the primary retail product.
+`SERPAPI_API_KEY` retrieves current Google Shopping listings. Results include a
+fetch time, retailer URL, and title-match score. Missing providers and uncertain
+matches are shown explicitly instead of being fabricated.
+
+The publishable Supabase key is safe for the frontend. `SUPABASE_SECRET_KEY` is
+backend-only and must never use a `VITE_` prefix or be committed.
+
+### Authentication setup
+
+The app opens on authentication and only renders the dashboard after Supabase
+returns a valid session. Supported methods:
+
+- Email and password sign-in
+- Email and password account creation
+- Phone OTP sign-in
+
+In Supabase Dashboard → Authentication → Providers:
+
+1. Enable Email for password authentication.
+2. Enable Phone and configure an SMS provider for OTP delivery.
+3. Add the frontend URL to Authentication → URL Configuration.
+
+The session is persisted by the Supabase client. Dashboard and Product Lens API
+requests include the access token and the FastAPI backend verifies it against
+the configured Supabase JWKS URL.
+
+### Option A — Frontend only
+
+The dashboard can render without the backend, but Product Lens requires FastAPI
+and configured providers for real recognition and live prices.
 
 ```bash
 # 1. Create a new Vite + React project

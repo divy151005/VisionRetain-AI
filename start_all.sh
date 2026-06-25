@@ -17,6 +17,9 @@ pip install numpy==1.26.4 scipy==1.17.1 pandas==2.2.2 xgboost==2.0.3 redis==5.0.
 # Avoid sklearn building; use binary wheel
 pip install scikit-learn==1.5.2 --only-binary=:all:
 
-# Run ML microservice (FastAPI)
-uvicorn main:app --host 0.0.0.0 --port 8002 --workers 1
-
+# Run backend with local secrets when .env exists.
+if [ -f ".env" ]; then
+  uvicorn main:app --host 0.0.0.0 --port 8002 --workers 1 --env-file .env
+else
+  uvicorn main:app --host 0.0.0.0 --port 8002 --workers 1
+fi

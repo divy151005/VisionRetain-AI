@@ -8,13 +8,15 @@ Run:
     uvicorn main:app --host 0.0.0.0 --port 8001 --workers 4
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Header, UploadFile, File
+
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -28,9 +30,15 @@ import logging
 import os
 from datetime import datetime, timedelta
 import uvicorn
+import jwt
+import requests
+import base64
+import hashlib
+import re
 
 # ── Setup ──────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
 logger = logging.getLogger("visionretain-ml")
 
 app = FastAPI(
@@ -45,6 +53,157 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Supabase Auth (JWT verification) ──────────────────────────────────────
+SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_VISION_MODEL = os.getenv("GEMINI_VISION_MODEL", "gemini-2.5-flash")
+SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY", "")
+PRICE_COUNTRY = os.getenv("PRICE_COUNTRY", "in")
+PRICE_LANGUAGE = os.getenv("PRICE_LANGUAGE", "en")
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))
+
+_JWKS_CACHE: Dict[str, Any] = {"keys": None, "fetched_at": None}
+
+
+def _fetch_jwks() -> Dict[str, Any]:
+    global _JWKS_CACHE
+    if not SUPABASE_JWKS_URL:
+        raise RuntimeError("SUPABASE_JWKS_URL is not set")
+
+    # Refresh JWKS periodically (best-effort)
+    if _JWKS_CACHE.get("keys") is not None and _JWKS_CACHE.get("fetched_at"):
+        try:
+            fetched_at = _JWKS_CACHE["fetched_at"]
+            if isinstance(fetched_at, str):
+                fetched_at_dt = datetime.fromisoformat(fetched_at)
+            else:
+                fetched_at_dt = fetched_at
+            if datetime.utcnow() - fetched_at_dt < timedelta(hours=6):
+                return _JWKS_CACHE["keys"]
+        except Exception:
+            pass
+
+    resp = requests.get(SUPABASE_JWKS_URL, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    _JWKS_CACHE = {"keys": data, "fetched_at": datetime.utcnow().isoformat()}
+    return data
+
+
+def _jwt_key_for_kid(kid: str) -> Dict[str, Any]:
+    jwks = _fetch_jwks()
+    for k in jwks.get("keys", []):
+        if k.get("kid") == kid:
+            return k
+    raise HTTPException(status_code=401, detail="Invalid token (unknown kid)")
+
+
+def verify_supabase_jwt(authorization: str = Header(None)) -> Dict[str, Any]:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    if not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=401, detail="Invalid token header")
+
+        jwk = _jwt_key_for_kid(kid)
+
+        public_key = jwt.PyJWK.from_dict(jwk).key
+
+        decoded = jwt.decode(
+            token,
+            key=public_key,
+            algorithms=[header.get("alg") or "RS256"],
+            options={"verify_aud": False},
+        )
+        return decoded
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+
+def optional_supabase_jwt(authorization: str = Header(None)) -> Dict[str, Any]:
+    if not authorization:
+        return {}
+    return verify_supabase_jwt(authorization)
+
+
+def _supabase_headers() -> Dict[str, str]:
+    if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        raise RuntimeError("Supabase backend credentials are not configured")
+    return {
+        "apikey": SUPABASE_SECRET_KEY,
+        "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def supabase_insert(table: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        logger.warning("Supabase persistence skipped: backend credentials are not configured")
+        return None
+    response = requests.post(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        headers=_supabase_headers(),
+        json=payload,
+        timeout=15,
+    )
+    if not response.ok:
+        logger.error("Supabase insert into %s failed: %s", table, response.text)
+        return None
+    rows = response.json()
+    return rows[0] if rows else None
+
+
+def supabase_select(table: str, select: str = "*", order: Optional[str] = None) -> List[Dict[str, Any]]:
+    if not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        return []
+    params = {"select": select}
+    if order:
+        params["order"] = order
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        headers=_supabase_headers(),
+        params=params,
+        timeout=15,
+    )
+    if not response.ok:
+        logger.error("Supabase select from %s failed: %s", table, response.text)
+        return []
+    return response.json()
+
+
+def supabase_recent_scans(owner_id: Optional[str], limit: int = 10) -> List[Dict[str, Any]]:
+    if not owner_id or not SUPABASE_URL or not SUPABASE_SECRET_KEY:
+        return []
+    params = {
+        "select": "id,product_name,brand,model,category,confidence,identity_status,"
+                  "objects,price_min,price_max,currency,prices_fetched_at,created_at",
+        "order": "created_at.desc",
+        "limit": str(max(1, min(limit, 50))),
+    }
+    params["owner_id"] = f"eq.{owner_id}"
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/product_scans",
+        headers=_supabase_headers(),
+        params=params,
+        timeout=15,
+    )
+    if not response.ok:
+        logger.error("Supabase recent scans failed: %s", response.text)
+        return []
+    return response.json()
+
 
 # Redis for caching predictions
 redis_client = redis.Redis(
@@ -111,6 +270,227 @@ class DemandForecastRequest(BaseModel):
 class SegmentRequest(BaseModel):
     customers: List[Dict[str, Any]]
     n_segments: int = Field(default=4, ge=2, le=10)
+
+
+class DetectedObject(BaseModel):
+    label: str
+    confidence: float = Field(ge=0, le=100)
+
+
+class ProductIdentification(BaseModel):
+    product_name: str
+    brand: Optional[str] = None
+    model: Optional[str] = None
+    category: str
+    confidence: float = Field(ge=0, le=100)
+    identity_status: str
+    features: List[str] = Field(default_factory=list)
+    ocr_text: Optional[str] = None
+    objects: List[DetectedObject] = Field(default_factory=list)
+    shopping_query: str
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("Vision provider did not return a JSON object")
+    return json.loads(cleaned[start:end + 1])
+
+
+def identify_product(image_bytes: bytes, mime_type: str) -> ProductIdentification:
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Product recognition is not configured. Set GEMINI_API_KEY on the backend.",
+        )
+    prompt = """
+Analyze this image for product intelligence. Detect every clearly visible physical object,
+then identify the primary retail product as precisely as visual evidence permits.
+Never guess a brand, model, variant, capacity, or generation. OCR visible labels and model
+numbers. Use identity_status exact only when a unique model/SKU is visible or unmistakable,
+probable when brand and product line are strongly supported, category_only when only the
+generic object type is supported, and unknown when the image is unusable.
+Confidence is an evidence-quality estimate from 0 to 100, not a guarantee.
+Return JSON only with:
+product_name, brand, model, category, confidence, identity_status,
+features (array), ocr_text, objects (array of {label, confidence}), shopping_query.
+shopping_query must include exact brand/model only when supported; otherwise use the
+specific generic category and visible attributes. Do not include prices.
+""".strip()
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_VISION_MODEL}:generateContent",
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY,
+        },
+        json={
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {
+                        "mime_type": mime_type,
+                        "data": base64.b64encode(image_bytes).decode("ascii"),
+                    }},
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": "application/json",
+            },
+        },
+        timeout=60,
+    )
+    if not response.ok:
+        logger.error("Gemini recognition failed: %s", response.text)
+        raise HTTPException(status_code=502, detail="Vision provider could not analyze this image")
+    try:
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return ProductIdentification.model_validate(_extract_json_object(text))
+    except Exception as exc:
+        logger.exception("Invalid vision response")
+        raise HTTPException(status_code=502, detail=f"Vision provider returned invalid data: {exc}")
+
+
+def _title_relevance(title: str, identification: ProductIdentification) -> float:
+    ignored = {"the", "with", "for", "and", "new", "buy", "online", "best"}
+    query = " ".join(filter(None, [
+        identification.brand,
+        identification.model,
+        identification.product_name,
+    ])).lower()
+    wanted = {
+        token for token in re.findall(r"[a-z0-9]+", query)
+        if len(token) > 1 and token not in ignored
+    }
+    found = set(re.findall(r"[a-z0-9]+", title.lower()))
+    if not wanted:
+        return 0
+    score = len(wanted & found) / len(wanted)
+    if identification.model:
+        model_tokens = set(re.findall(r"[a-z0-9]+", identification.model.lower()))
+        if model_tokens and not model_tokens.issubset(found):
+            score *= 0.45
+    return round(score, 4)
+
+
+def fetch_live_prices(identification: ProductIdentification) -> Dict[str, Any]:
+    fetched_at = datetime.utcnow().isoformat() + "Z"
+    if not SERPAPI_API_KEY:
+        return {
+            "status": "unconfigured",
+            "message": "Set SERPAPI_API_KEY to retrieve current shopping listings.",
+            "fetched_at": None,
+            "listings": [],
+        }
+    response = requests.get(
+        "https://serpapi.com/search.json",
+        params={
+            "engine": "google_shopping",
+            "q": identification.shopping_query,
+            "api_key": SERPAPI_API_KEY,
+            "gl": PRICE_COUNTRY,
+            "hl": PRICE_LANGUAGE,
+            "num": 20,
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        logger.error("Shopping search failed: %s", response.text)
+        return {
+            "status": "provider_error",
+            "message": "The live shopping provider is temporarily unavailable.",
+            "fetched_at": fetched_at,
+            "listings": [],
+        }
+    payload = response.json()
+    listings = []
+    for item in payload.get("shopping_results", []):
+        price = item.get("extracted_price")
+        title = item.get("title", "")
+        link = item.get("product_link") or item.get("link")
+        if not isinstance(price, (int, float)) or not title or not link:
+            continue
+        relevance = _title_relevance(title, identification)
+        minimum = 0.62 if identification.identity_status in ("exact", "probable") else 0.35
+        if relevance < minimum:
+            continue
+        listings.append({
+            "store": item.get("source") or "Unknown store",
+            "title": title,
+            "price": float(price),
+            "currency": "INR" if PRICE_COUNTRY.lower() == "in" else item.get("currency", "USD"),
+            "product_url": link,
+            "source_url": payload.get("search_metadata", {}).get("google_shopping_url"),
+            "availability": item.get("delivery") or "Check retailer",
+            "rating": item.get("rating"),
+            "reviews": item.get("reviews"),
+            "relevance": relevance,
+            "fetched_at": fetched_at,
+        })
+    listings.sort(key=lambda row: row["price"])
+    for index, listing in enumerate(listings):
+        listing["badge"] = "Best current price" if index == 0 else None
+    return {
+        "status": "live" if listings else "no_verified_matches",
+        "message": None if listings else "No sufficiently relevant current listings were found.",
+        "fetched_at": fetched_at,
+        "listings": listings[:12],
+    }
+
+
+def persist_product_scan(
+    owner_id: Optional[str],
+    image_bytes: bytes,
+    identification: ProductIdentification,
+    pricing: Dict[str, Any],
+) -> Optional[str]:
+    listings = pricing.get("listings", [])
+    prices = [item["price"] for item in listings]
+    scan = supabase_insert("product_scans", {
+        "owner_id": owner_id,
+        "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
+        "product_name": identification.product_name,
+        "brand": identification.brand,
+        "model": identification.model,
+        "category": identification.category,
+        "confidence": identification.confidence,
+        "identity_status": identification.identity_status,
+        "objects": [item.model_dump() for item in identification.objects],
+        "features": identification.features,
+        "ocr_text": identification.ocr_text,
+        "price_min": min(prices) if prices else None,
+        "price_max": max(prices) if prices else None,
+        "currency": listings[0]["currency"] if listings else None,
+        "prices_fetched_at": pricing.get("fetched_at"),
+        "provider_metadata": {
+            "vision_model": GEMINI_VISION_MODEL,
+            "price_provider": "SerpApi Google Shopping" if SERPAPI_API_KEY else None,
+            "price_status": pricing.get("status"),
+        },
+    })
+    if not scan:
+        return None
+    for listing in listings:
+        supabase_insert("price_listings", {
+            "scan_id": scan["id"],
+            "owner_id": owner_id,
+            "store": listing["store"],
+            "title": listing["title"],
+            "price": listing["price"],
+            "currency": listing["currency"],
+            "product_url": listing["product_url"],
+            "source_url": listing.get("source_url"),
+            "availability": listing.get("availability"),
+            "rating": listing.get("rating"),
+            "relevance": listing.get("relevance"),
+            "fetched_at": listing["fetched_at"],
+        })
+    return scan["id"]
 
 # ── Model Manager ──────────────────────────────────────────────────────────────
 class ModelManager:
@@ -371,11 +751,63 @@ def health():
     return {
         "status": "healthy",
         "models_trained": model_manager.is_trained,
+        "product_lens": {
+            "vision_configured": bool(GEMINI_API_KEY),
+            "live_prices_configured": bool(SERPAPI_API_KEY),
+            "supabase_configured": bool(SUPABASE_URL and SUPABASE_SECRET_KEY),
+        },
         "timestamp": datetime.utcnow().isoformat(),
     }
 
+
+@app.post("/api/v1/product-lens/scan")
+async def scan_product(
+    image: UploadFile = File(...),
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+):
+    mime_type = image.content_type or ""
+    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}:
+        raise HTTPException(status_code=415, detail="Upload a JPEG, PNG, WebP, HEIC, or HEIF image")
+    image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="The uploaded image is empty")
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail=f"Image exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+
+    identification = identify_product(image_bytes, mime_type)
+    pricing = fetch_live_prices(identification)
+    scan_id = persist_product_scan(user.get("sub"), image_bytes, identification, pricing)
+    return {
+        "scan_id": scan_id,
+        "identification": identification.model_dump(),
+        "pricing": pricing,
+        "accuracy_note": (
+            "Exact identity requires visible model/SKU evidence. Confidence is the model's "
+            "evidence estimate; verify the retailer title before purchase."
+        ),
+    }
+
+
+@app.get("/api/v1/product-lens/history")
+def product_scan_history(
+    limit: int = 10,
+    user: Dict[str, Any] = Depends(verify_supabase_jwt),
+):
+    return {"scans": supabase_recent_scans(user.get("sub"), limit)}
+
+
+@app.get("/api/v1/dashboard")
+def dashboard_data(_: Dict[str, Any] = Depends(verify_supabase_jwt)):
+    return {
+        "metrics": supabase_select("dashboard_metrics", order="sort_order.asc"),
+        "customers": supabase_select("customers", order="updated_at.desc"),
+        "fetched_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
 @app.post("/predict/churn")
-def predict_churn(features: CustomerFeatures):
+def predict_churn(features: CustomerFeatures, _: Dict[str, Any] = Depends(verify_supabase_jwt)):
+
     """Predict churn probability for a single customer."""
     # Check Redis cache
     cache_key = f"churn:{features.customer_id}"
@@ -391,7 +823,8 @@ def predict_churn(features: CustomerFeatures):
     return result
 
 @app.post("/predict/churn/batch")
-def predict_churn_batch(request: BatchPredictRequest):
+def predict_churn_batch(request: BatchPredictRequest, _: Dict[str, Any] = Depends(verify_supabase_jwt)):
+
     """Batch churn prediction for multiple customers."""
     results = []
     for customer in request.customers:
@@ -409,7 +842,8 @@ def predict_churn_batch(request: BatchPredictRequest):
     }
 
 @app.post("/predict/demand")
-def predict_demand(request: DemandForecastRequest):
+def predict_demand(request: DemandForecastRequest, _: Dict[str, Any] = Depends(verify_supabase_jwt)):
+
     """
     Simple exponential smoothing + trend extrapolation demand forecast.
     In production: use Prophet or LSTM for better accuracy.
@@ -462,7 +896,8 @@ def predict_demand(request: DemandForecastRequest):
     }
 
 @app.post("/predict/ltv")
-def predict_ltv(features: CustomerFeatures):
+def predict_ltv(features: CustomerFeatures, _: Dict[str, Any] = Depends(verify_supabase_jwt)):
+
     """Predict 12-month Customer Lifetime Value."""
     monthly_spend = features.monthly_spend
     churn_result = model_manager.predict_churn(features)
@@ -493,7 +928,8 @@ def predict_ltv(features: CustomerFeatures):
     }
 
 @app.post("/segment/customers")
-def segment_customers(request: SegmentRequest):
+def segment_customers(request: SegmentRequest, _: Dict[str, Any] = Depends(verify_supabase_jwt)):
+
     """K-Means customer segmentation with RFM features."""
     result = model_manager.segment_customers(request.customers, request.n_segments)
     return result

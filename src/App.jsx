@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  getAccessToken,
+  getSession,
+  onAuthStateChange,
+  signInWithPassword,
+  signInWithPhoneOtp,
+  signOut,
+  signUpWithPassword,
+  verifyPhoneOtp,
+} from "./otpAuth";
 
-// ─── Design System ──────────────────────────────────────────────────────────
+
+// ─── Design System
 const C = {
   bg: "#050816", bgSec: "#0F172A", bgCard: "#0D1B3E",
   accent: "#00E5FF", success: "#00FF88", warning: "#FFC857",
@@ -35,60 +46,6 @@ const CUSTOMERS = [
   { id: "C007", name: "Karan Verma", email: "karan@media.in", plan: "Business", spend: 33100, churn: 95, risk: "Critical", segment: "B2B", ltv: 397200, nps: 11, tenure: 7, lastActive: "45 days ago" },
   { id: "C008", name: "Deepika Nair", email: "deepika@health.io", plan: "Starter", spend: 6700, churn: 31, risk: "Low", segment: "SMB", ltv: 80400, nps: 67, tenure: 10, lastActive: "3 days ago" },
 ];
-
-const PRODUCTS = [
-  { name: "Sony WH-1000XM5", brand: "Sony", category: "Headphones", confidence: 97.3, model: "WH-1000XM5", price: 29999, image: "🎧" },
-  { name: "iPhone 15 Pro", brand: "Apple", category: "Smartphone", confidence: 99.1, model: "A3101", price: 134900, image: "📱" },
-  { name: "LG 55\" OLED TV", brand: "LG", category: "Television", confidence: 94.8, model: "OLED55C3", price: 89990, image: "📺" },
-  { name: "Samsung Galaxy S24", brand: "Samsung", category: "Smartphone", confidence: 96.2, model: "SM-S921B", price: 79999, image: "📲" },
-];
-
-const ECOM_PRICES = {
-  "Sony WH-1000XM5": [
-    { store: "Amazon", price: 26999, avail: "In Stock", delivery: "2 days", rating: 4.7, badge: "Best Price", link: "#" },
-    { store: "Flipkart", price: 27499, avail: "In Stock", delivery: "3 days", rating: 4.6, badge: null, link: "#" },
-    { store: "Croma", price: 29999, avail: "In Stock", delivery: "1 day", rating: 4.5, badge: "Fastest", link: "#" },
-    { store: "Vijay Sales", price: 28500, avail: "Limited", delivery: "4 days", rating: 4.4, badge: null, link: "#" },
-    { store: "Reliance Digital", price: 28999, avail: "In Stock", delivery: "2 days", rating: 4.5, badge: null, link: "#" },
-  ],
-  "iPhone 15 Pro": [
-    { store: "Amazon", price: 129900, avail: "In Stock", delivery: "1 day", rating: 4.8, badge: "Best Price", link: "#" },
-    { store: "Flipkart", price: 131000, avail: "In Stock", delivery: "2 days", rating: 4.7, badge: null, link: "#" },
-    { store: "Croma", price: 134900, avail: "In Stock", delivery: "Same Day", rating: 4.9, badge: "Fastest", link: "#" },
-    { store: "Reliance Digital", price: 132000, avail: "In Stock", delivery: "1 day", rating: 4.6, badge: null, link: "#" },
-    { store: "Vijay Sales", price: 133500, avail: "Limited", delivery: "3 days", rating: 4.5, badge: null, link: "#" },
-  ],
-  "LG 55\" OLED TV": [
-    { store: "Amazon", price: 82000, avail: "In Stock", delivery: "3 days", rating: 4.6, badge: "Best Price", link: "#" },
-    { store: "Flipkart", price: 84990, avail: "In Stock", delivery: "4 days", rating: 4.5, badge: null, link: "#" },
-    { store: "Croma", price: 89990, avail: "In Stock", delivery: "1 day", rating: 4.8, badge: "Top Rated", link: "#" },
-    { store: "Vijay Sales", price: 86500, avail: "In Stock", delivery: "3 days", rating: 4.4, badge: null, link: "#" },
-    { store: "Reliance Digital", price: 87000, avail: "Limited", delivery: "2 days", rating: 4.5, badge: null, link: "#" },
-  ],
-  "Samsung Galaxy S24": [
-    { store: "Amazon", price: 74999, avail: "In Stock", delivery: "1 day", rating: 4.5, badge: "Best Price", link: "#" },
-    { store: "Flipkart", price: 75999, avail: "In Stock", delivery: "2 days", rating: 4.4, badge: null, link: "#" },
-    { store: "Croma", price: 79999, avail: "In Stock", delivery: "Same Day", rating: 4.6, badge: "Fastest", link: "#" },
-    { store: "Reliance Digital", price: 77000, avail: "In Stock", delivery: "1 day", rating: 4.4, badge: null, link: "#" },
-    { store: "Vijay Sales", price: 78500, avail: "Limited", delivery: "3 days", rating: 4.3, badge: null, link: "#" },
-  ],
-};
-
-// Price history over 6 months
-const PRICE_HISTORY = {
-  "Sony WH-1000XM5": {
-    labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-    amazon: [32999, 30999, 29499, 27999, 27499, 26999],
-    flipkart: [32499, 31000, 29999, 28500, 28000, 27499],
-    croma: [34999, 33999, 32000, 30999, 30499, 29999],
-  },
-  "iPhone 15 Pro": {
-    labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-    amazon: [139900, 137000, 135000, 132000, 130500, 129900],
-    flipkart: [140999, 138000, 136000, 133500, 132000, 131000],
-    croma: [144900, 142000, 140000, 137000, 136000, 134900],
-  },
-};
 
 const CHURN_FACTORS = [
   { factor: "Low Engagement Score", impact: 0.34, direction: "negative" },
@@ -178,8 +135,106 @@ function callClaude(messages, systemPrompt) {
   }).then(r => r.json());
 }
 
-const ML_BASE_URL = "http://127.0.0.1:8002";
+const ML_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8002";
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function productIcon(category = "") {
+  const value = category.toLowerCase();
+  if (value.includes("phone")) return "📱";
+  if (value.includes("headphone") || value.includes("audio")) return "🎧";
+  if (value.includes("computer") || value.includes("laptop")) return "💻";
+  if (value.includes("camera")) return "📷";
+  if (value.includes("shoe") || value.includes("footwear")) return "👟";
+  if (value.includes("watch")) return "⌚";
+  if (value.includes("television") || value.includes("tv")) return "📺";
+  return "📦";
+}
+
+async function optionalAccessToken() {
+  try {
+    return await getAccessToken();
+  } catch {
+    return null;
+  }
+}
+
+function useLiveDashboard(enabled = true, pollMs = 15000) {
+  const [live, setLive] = useState({
+    loading: false,
+    error: null,
+    kpis: null,
+    demand: null,
+    revenue: null,
+    sentiment: null,
+    riskDistribution: null,
+    highRiskCustomers: null,
+  });
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+
+    async function tick() {
+      setLive((p) => ({ ...p, loading: true, error: null }));
+      try {
+        const baseUrl = "http://127.0.0.1:8001";
+        const [kpisRes, demandRes, revenueRes, sentimentRes, riskRes] = await Promise.all([
+          fetch(`${baseUrl}/dashboard/kpis`),
+          fetch(`${baseUrl}/dashboard/demand`),
+          fetch(`${baseUrl}/dashboard/revenue`),
+          fetch(`${baseUrl}/dashboard/sentiment`),
+          fetch(`${baseUrl}/dashboard/risk-distribution`),
+        ]);
+
+        const [kpis, demand, revenue, sentiment, riskDistribution] = await Promise.all([
+          kpisRes.ok ? kpisRes.json() : Promise.resolve(null),
+          demandRes.ok ? demandRes.json() : Promise.resolve(null),
+          revenueRes.ok ? revenueRes.json() : Promise.resolve(null),
+          sentimentRes.ok ? sentimentRes.json() : Promise.resolve(null),
+          riskRes.ok ? riskRes.json() : Promise.resolve(null),
+        ]);
+
+        // optional high-risk customers
+        const highRiskRes = await fetch(`${baseUrl}/dashboard/high-risk-customers`);
+        const highRiskCustomers = highRiskRes.ok ? await highRiskRes.json() : null;
+
+        if (!cancelled) {
+          setLive({
+            loading: false,
+            error: null,
+            kpis,
+            demand,
+            revenue,
+            sentiment,
+            riskDistribution,
+            highRiskCustomers,
+          });
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLive((p) => ({ ...p, loading: false, error: String(e?.message || e) }));
+        }
+      }
+    }
+
+    tick();
+    const id = setInterval(tick, pollMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [enabled, pollMs]);
+
+  return live;
+}
+
+
+// ─── Supabase Auth (via src/otpAuth.js) ─────────────────────────────────────
+
+// Note: this dashboard currently uses the ML microservice without auth.
+// Supabase helpers are imported for future protected API calls.
+
+
 
 function customerToFeatures(customer) {
   const inactiveDays = Number(customer.lastActive.match(/\d+/)?.[0] || 1);
@@ -208,26 +263,6 @@ async function predictChurnWithML(customer) {
   });
   if (!res.ok) throw new Error("ML churn prediction failed");
   return res.json();
-}
-
-function localProductInsight(seed = "") {
-  const index = Math.abs([...seed].reduce((sum, ch) => sum + ch.charCodeAt(0), 0)) % PRODUCTS.length;
-  const product = PRODUCTS[index] || PRODUCTS[0];
-  return {
-    productName: product.name,
-    brand: product.brand,
-    model: product.model,
-    category: product.category,
-    confidence: product.confidence,
-    image: product.image,
-    price: product.price,
-    keyFeatures: product.category === "Smartphone"
-      ? ["Flagship processor", "High-resolution display", "5G connectivity"]
-      : product.category === "Headphones"
-        ? ["Active noise cancellation", "Long battery life", "Premium wireless audio"]
-        : ["High contrast panel", "Smart TV platform", "Energy-efficient display"],
-    ocrText: `${product.brand} ${product.model}`,
-  };
 }
 
 function localSentimentAnalysis(text) {
@@ -433,52 +468,6 @@ function DemandChart() {
   );
 }
 
-// ─── Price History Chart (SVG) ────────────────────────────────────────────────
-function PriceHistoryChart({ product }) {
-  const hist = PRICE_HISTORY[product] || PRICE_HISTORY["Sony WH-1000XM5"];
-  const allPrices = [...hist.amazon, ...hist.flipkart, ...hist.croma];
-  const minP = Math.min(...allPrices) - 500;
-  const maxP = Math.max(...allPrices) + 500;
-  const W = 580, H = 140;
-  const x = (i) => 40 + (i / (hist.labels.length - 1)) * (W - 60);
-  const y = (v) => H - ((v - minP) / (maxP - minP)) * (H - 20) - 10;
-  const line = (arr) => arr.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const series = [
-    { data: hist.amazon, color: C.accent, label: "Amazon" },
-    { data: hist.flipkart, color: C.success, label: "Flipkart" },
-    { data: hist.croma, color: C.warning, label: "Croma" },
-  ];
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H + 40}`} style={{ width: "100%", height: 180 }}>
-        {[minP, (minP + maxP) / 2, maxP].map(v => (
-          <g key={v}>
-            <line x1={40} y1={y(v)} x2={W - 20} y2={y(v)} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-            <text x={36} y={y(v) + 4} fill={C.muted} fontSize={9} textAnchor="end">₹{Math.round(v/1000)}k</text>
-          </g>
-        ))}
-        {hist.labels.map((m, i) => (
-          <text key={m} x={x(i)} y={H + 16} fill={C.muted} fontSize={10} textAnchor="middle">{m}</text>
-        ))}
-        {series.map(s => (
-          <polyline key={s.label} points={line(s.data)} fill="none" stroke={s.color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-        ))}
-        {series.map(s => s.data.map((v, i) => (
-          <circle key={`${s.label}-${i}`} cx={x(i)} cy={y(v)} r={3} fill={s.color} />
-        )))}
-      </svg>
-      <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
-        {series.map(s => (
-          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 20, height: 2, background: s.color, borderRadius: 2 }} />
-            <span style={{ color: C.muted, fontSize: 11 }}>{s.label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── Revenue Chart (SVG) ─────────────────────────────────────────────────────
 function RevenueChart() {
   const data = REVENUE_DATA.monthly;
@@ -522,64 +511,94 @@ function ProductLensModule() {
   const [progress, setProgress] = useState(0);
   const [aiResult, setAiResult] = useState(null);
   const [uploadedImage, setUploadedImage] = useState(null);
+  const [prices, setPrices] = useState([]);
+  const [priceStatus, setPriceStatus] = useState(null);
+  const [pricesFetchedAt, setPricesFetchedAt] = useState(null);
+  const [recentScans, setRecentScans] = useState([]);
+  const [scanError, setScanError] = useState("");
   const fileRef = useRef(null);
   const cameraRef = useRef(null);
   const [showCamera, setShowCamera] = useState(false);
   const [stream, setStream] = useState(null);
 
-  const simulateScan = (product) => {
-    setPhase("scanning");
-    setProgress(0);
-    setSelected(null);
-    setAiResult(null);
-    let p = 0;
-    const iv = setInterval(() => {
-      p += Math.random() * 15 + 5;
-      if (p >= 100) {
-        p = 100;
-        clearInterval(iv);
-        setPhase("detected");
-        setSelected(product || PRODUCTS[Math.floor(Math.random() * PRODUCTS.length)]);
+  const loadRecentScans = useCallback(async () => {
+    try {
+      const token = await optionalAccessToken();
+      if (!token) return;
+      const response = await fetch(`${ML_BASE_URL}/api/v1/product-lens/history?limit=8`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setRecentScans(data.scans || []);
       }
-      setProgress(Math.min(p, 100));
-    }, 150);
-  };
+    } catch {
+      // History is supplemental; scanning remains available if persistence is offline.
+    }
+  }, []);
 
-  const analyzeImageWithAI = async (base64Data, mimeType, seed = "") => {
+  useEffect(() => {
+    loadRecentScans();
+  }, [loadRecentScans]);
+
+  const analyzeImageWithAI = async (file) => {
     setPhase("scanning");
     setProgress(0);
+    setScanError("");
+    setPrices([]);
+    setPriceStatus(null);
     const progIv = setInterval(() => {
       setProgress(p => Math.min(p + Math.random() * 8 + 3, 88));
     }, 200);
     try {
-      await wait(900);
+      const token = await optionalAccessToken();
+      const body = new FormData();
+      body.append("image", file);
+      const response = await fetch(`${ML_BASE_URL}/api/v1/product-lens/scan`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body,
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Product scan failed");
+      }
       clearInterval(progIv);
       setProgress(100);
-      const parsed = localProductInsight(`${seed}-${mimeType}-${base64Data?.length || 0}`);
-      setAiResult(parsed);
-      // Map to ECOM_PRICES using product name or fallback
-      const matchedProduct = PRODUCTS.find(p =>
-        p.name.toLowerCase().includes(parsed.brand?.toLowerCase()) ||
-        p.name.toLowerCase().includes(parsed.productName?.toLowerCase().split(" ")[0])
-      );
+      const parsed = result.identification;
+      setAiResult(result);
       setSelected({
-        name: parsed.productName || "Unknown Product",
-        brand: parsed.brand || "Unknown",
-        category: parsed.category || "Electronics",
-        confidence: parsed.confidence || 92,
-        model: parsed.model || "N/A",
-        price: parsed.price || 29999,
-        image: parsed.image || "📦",
-        keyFeatures: parsed.keyFeatures || [],
-        ocrText: parsed.ocrText || "",
+        name: parsed.product_name || "Unknown object",
+        brand: parsed.brand || "Not verified",
+        category: parsed.category || "Unknown",
+        confidence: Number(parsed.confidence || 0),
+        model: parsed.model || "Not verified",
+        image: productIcon(parsed.category),
+        keyFeatures: parsed.features || [],
+        ocrText: parsed.ocr_text || "",
+        objects: parsed.objects || [],
+        identityStatus: parsed.identity_status,
         isAiDetected: true,
-        ecomKey: matchedProduct?.name,
       });
+      setPrices(result.pricing?.listings || []);
+      setPriceStatus(result.pricing);
+      setPricesFetchedAt(result.pricing?.fetched_at || null);
+      setRecentScans(current => [{
+        id: result.scan_id || `local-${Date.now()}`,
+        product_name: parsed.product_name,
+        category: parsed.category,
+        confidence: parsed.confidence,
+        created_at: new Date().toISOString(),
+      }, ...current.filter(item => item.id !== result.scan_id)].slice(0, 8));
       setPhase("detected");
+      loadRecentScans();
     } catch (err) {
       clearInterval(progIv);
-      setPhase("detected");
-      setSelected(PRODUCTS[0]);
+      const message = err.message === "Failed to fetch"
+        ? "Product Lens backend is offline. Start it with npm run dev:all or ./start_all.sh."
+        : err.message || "Detection failed";
+      setScanError(message);
+      setPhase("error");
     }
   };
 
@@ -589,10 +608,8 @@ function ProductLensModule() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target.result;
-      const base64 = result.split(",")[1];
-      const mimeType = file.type;
       setUploadedImage(result);
-      analyzeImageWithAI(base64, mimeType, file.name);
+      analyzeImageWithAI(file);
     };
     reader.readAsDataURL(file);
   };
@@ -603,7 +620,8 @@ function ProductLensModule() {
       setStream(s);
       setShowCamera(true);
     } catch {
-      simulateScan(null);
+      setScanError("Camera access was denied. Upload an image instead.");
+      setPhase("error");
     }
   };
 
@@ -615,16 +633,18 @@ function ProductLensModule() {
     canvas.height = video.videoHeight;
     canvas.getContext("2d").drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg");
-    const base64 = dataUrl.split(",")[1];
     stream.getTracks().forEach(t => t.stop());
     setStream(null);
     setShowCamera(false);
     setUploadedImage(dataUrl);
-    analyzeImageWithAI(base64, "image/jpeg", "camera-capture");
+    canvas.toBlob(blob => {
+      if (blob) analyzeImageWithAI(new File([blob], "camera-capture.jpg", { type: "image/jpeg" }));
+    }, "image/jpeg", 0.92);
   };
 
-  const ecomKey = selected?.ecomKey || selected?.name;
-  const prices = ECOM_PRICES[ecomKey] || ECOM_PRICES["Sony WH-1000XM5"];
+  const displayPrice = prices.length
+    ? `${prices[0].currency === "INR" ? "₹" : `${prices[0].currency} `}${prices[0].price.toLocaleString()}`
+    : "No verified live price";
 
   return (
     <div>
@@ -660,7 +680,7 @@ function ProductLensModule() {
                   <button onClick={() => fileRef.current?.click()} style={{ background: "transparent", color: C.accent, border: `1px solid ${C.accent}44`, borderRadius: 10, padding: "10px 20px", fontSize: 13, cursor: "pointer" }}>⬆ Upload</button>
                   <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileUpload} />
                 </div>
-                <p style={{ color: C.muted, fontSize: 11, marginTop: 14 }}>Powered by Gemini Vision + YOLOv8 + PaddleOCR</p>
+                <p style={{ color: C.muted, fontSize: 11, marginTop: 14 }}>Vision recognition + verified live shopping matches</p>
               </div>
             )}
             {phase === "scanning" && (
@@ -670,7 +690,7 @@ function ProductLensModule() {
                   <div style={{ width: 54, height: 54, borderRadius: "50%", border: `2px solid ${C.accent}`, borderTopColor: "transparent", animation: "spin 0.8s linear infinite", position: "absolute" }} />
                   <span style={{ fontSize: 28 }}>◎</span>
                 </div>
-                <p style={{ color: C.accent, fontSize: 13, marginBottom: 12 }}>Analyzing with Gemini Vision + YOLOv8...</p>
+                <p style={{ color: C.accent, fontSize: 13, marginBottom: 12 }}>Identifying objects and checking current listings...</p>
                 <div style={{ background: "#ffffff08", borderRadius: 4, height: 6, overflow: "hidden" }}>
                   <div style={{ width: `${progress}%`, height: "100%", background: `linear-gradient(90deg, ${C.accent}, ${C.purple})`, transition: "width 0.2s" }} />
                 </div>
@@ -692,8 +712,9 @@ function ProductLensModule() {
                   ["Brand", selected.brand],
                   ["Model", selected.model],
                   ["Category", selected.category],
-                  ["Confidence", `${selected.confidence}%`],
-                  ["Est. Price", `₹${selected.price?.toLocaleString()}`],
+                  ["Identity", selected.identityStatus?.replace("_", " ") || "unknown"],
+                  ["Confidence estimate", `${selected.confidence.toFixed(1)}%`],
+                  ["Best verified price", displayPrice],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
                     <span style={{ color: C.muted, fontSize: 13 }}>{k}</span>
@@ -713,13 +734,21 @@ function ProductLensModule() {
                     <span style={{ color: C.success, fontSize: 12 }}>✓ OCR: "{selected.ocrText.slice(0, 60)}{selected.ocrText.length > 60 ? "..." : ""}"</span>
                   </div>
                 )}
-                <button onClick={() => { setPhase("idle"); setSelected(null); setUploadedImage(null); setAiResult(null); }} style={{ width: "100%", marginTop: 12, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px", fontSize: 12, cursor: "pointer" }}>Scan another product</button>
+                {selected.objects?.length > 0 && (
+                  <div style={{ marginTop: 10, color: C.muted, fontSize: 11 }}>
+                    Objects found: {selected.objects.map(object => `${object.label} (${Math.round(object.confidence)}%)`).join(", ")}
+                  </div>
+                )}
+                <p style={{ color: C.warning, fontSize: 10, lineHeight: 1.5, margin: "12px 0 0" }}>
+                  Exact identity requires visible model/SKU evidence. Always verify the retailer title before purchase.
+                </p>
+                <button onClick={() => { setPhase("idle"); setSelected(null); setUploadedImage(null); setAiResult(null); setPrices([]); }} style={{ width: "100%", marginTop: 12, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px", fontSize: 12, cursor: "pointer" }}>Scan another product</button>
               </div>
             )}
             {phase === "error" && (
               <div style={{ textAlign: "center", padding: "30px 0" }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>⚠</div>
-                <p style={{ color: C.danger, fontSize: 14 }}>Detection failed. Please try again.</p>
+                <p style={{ color: C.danger, fontSize: 14 }}>{scanError || "Detection failed. Please try again."}</p>
                 <button onClick={() => setPhase("idle")} style={{ background: C.accent, color: "#000", border: "none", borderRadius: 10, padding: "8px 20px", marginTop: 12, cursor: "pointer" }}>Retry</button>
               </div>
             )}
@@ -732,14 +761,17 @@ function ProductLensModule() {
             <p style={{ color: C.accent, fontSize: 12, margin: 0, letterSpacing: "0.1em", textTransform: "uppercase" }}>Recent Scans</p>
           </div>
           <div style={{ padding: 16 }}>
-            {PRODUCTS.map((p, i) => (
-              <div key={i} onClick={() => simulateScan(p)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", borderRadius: 10, cursor: "pointer", marginBottom: 8, background: selected?.name === p.name ? "#00E5FF0D" : "transparent", border: `1px solid ${selected?.name === p.name ? C.accent + "44" : "transparent"}`, transition: "all 0.2s" }}>
-                <span style={{ fontSize: 28 }}>{p.image}</span>
+            {recentScans.length === 0 && (
+              <p style={{ color: C.muted, fontSize: 12, padding: 12 }}>No persisted scans yet. Upload an image to begin.</p>
+            )}
+            {recentScans.map((p) => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", borderRadius: 10, marginBottom: 8, background: "transparent", border: "1px solid transparent" }}>
+                <span style={{ fontSize: 28 }}>{productIcon(p.category)}</span>
                 <div style={{ flex: 1 }}>
-                  <p style={{ color: C.text, fontSize: 13, margin: "0 0 2px", fontWeight: 500 }}>{p.name}</p>
-                  <p style={{ color: C.muted, fontSize: 11, margin: 0 }}>{p.category}</p>
+                  <p style={{ color: C.text, fontSize: 13, margin: "0 0 2px", fontWeight: 500 }}>{p.product_name}</p>
+                  <p style={{ color: C.muted, fontSize: 11, margin: 0 }}>{p.category} · {new Date(p.created_at).toLocaleString()}</p>
                 </div>
-                <span style={{ color: C.success, fontSize: 12, fontWeight: 700 }}>{p.confidence}%</span>
+                <span style={{ color: C.success, fontSize: 12, fontWeight: 700 }}>{Number(p.confidence).toFixed(1)}%</span>
               </div>
             ))}
           </div>
@@ -754,56 +786,51 @@ function ProductLensModule() {
               <p style={{ color: C.accent, fontSize: 12, margin: 0, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                 Price Intelligence — {selected.name}
               </p>
-              <span style={{ color: C.muted, fontSize: 11 }}>5 platforms • Updated just now</span>
+              <span style={{ color: C.muted, fontSize: 11 }}>
+                {prices.length} verified matches
+                {pricesFetchedAt ? ` • ${new Date(pricesFetchedAt).toLocaleString()}` : ""}
+              </span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.border}` }}>
-                    {["Store", "Price", "Availability", "Delivery", "Rating", ""].map(h => (
+                    {["Store", "Price", "Availability", "Match", "Rating", ""].map(h => (
                       <th key={h} style={{ padding: "12px 16px", color: C.muted, fontWeight: 500, textAlign: "left" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {prices.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, background: r.badge === "Best Price" ? "#00FF8808" : "transparent" }}>
+                    <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, background: r.badge ? "#00FF8808" : "transparent" }}>
                       <td style={{ padding: "12px 16px", color: C.text, fontWeight: 500 }}>
                         {r.store}
-                        {r.badge && <span style={{ marginLeft: 8, background: r.badge === "Best Price" ? "#00FF8820" : "#00E5FF20", color: r.badge === "Best Price" ? C.success : C.accent, fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{r.badge}</span>}
+                        {r.badge && <span style={{ marginLeft: 8, background: "#00FF8820", color: C.success, fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{r.badge}</span>}
                       </td>
-                      <td style={{ padding: "12px 16px", color: r.badge === "Best Price" ? C.success : C.text, fontWeight: r.badge === "Best Price" ? 700 : 400 }}>
-                        ₹{r.price.toLocaleString()}
+                      <td style={{ padding: "12px 16px", color: r.badge ? C.success : C.text, fontWeight: r.badge ? 700 : 400 }}>
+                        {r.currency === "INR" ? "₹" : `${r.currency} `}{r.price.toLocaleString()}
                       </td>
                       <td style={{ padding: "12px 16px" }}>
-                        <span style={{ color: r.avail === "In Stock" ? C.success : C.warning, fontSize: 12 }}>● {r.avail}</span>
+                        <span style={{ color: C.warning, fontSize: 12 }}>● {r.availability}</span>
                       </td>
-                      <td style={{ padding: "12px 16px", color: C.muted }}>{r.delivery}</td>
-                      <td style={{ padding: "12px 16px", color: C.warning }}>★ {r.rating}</td>
+                      <td style={{ padding: "12px 16px", color: C.muted }}>{Math.round((r.relevance || 0) * 100)}% title match</td>
+                      <td style={{ padding: "12px 16px", color: C.warning }}>{r.rating ? `★ ${r.rating}` : "—"}</td>
                       <td style={{ padding: "12px 16px" }}>
-                        <button onClick={() => downloadText(`${selected.name}-${r.store}.txt`, `${selected.name}\n${r.store}: ₹${r.price.toLocaleString()}\nAvailability: ${r.avail}\nDelivery: ${r.delivery}\nRating: ${r.rating}`)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.accent, borderRadius: 6, padding: "4px 12px", fontSize: 11, cursor: "pointer" }}>View ↗</button>
+                        <button onClick={() => window.open(r.product_url, "_blank", "noopener,noreferrer")} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.accent, borderRadius: 6, padding: "4px 12px", fontSize: 11, cursor: "pointer" }}>Open ↗</button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {prices.length === 0 && (
+              <div style={{ padding: 20, color: C.muted, fontSize: 13 }}>
+                {priceStatus?.message || "No verified live listings are available for this identification."}
+              </div>
+            )}
           </div>
 
           {/* Price History Chart */}
-          {PRICE_HISTORY[ecomKey] && (
-            <div style={{ marginTop: 16, background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 20 }}>
-              <p style={{ color: C.accent, fontSize: 12, margin: "0 0 16px", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-                6-Month Price History — {ecomKey}
-              </p>
-              <PriceHistoryChart product={ecomKey} />
-              <div style={{ marginTop: 14, padding: "10px 14px", background: "#7C3AED0A", borderRadius: 10, border: `1px solid ${C.purple}22` }}>
-                <p style={{ color: C.text, fontSize: 12, margin: 0 }}>
-                  ✦ <strong>Price Insight:</strong> Amazon has dropped ₹6,000 over 6 months — a 18% decline. Based on trend, expect further drop to ~₹25,499 in August.
-                </p>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -811,11 +838,11 @@ function ProductLensModule() {
 }
 
 // ─── Customers Module ─────────────────────────────────────────────────────────
-function CustomersModule() {
+function CustomersModule({ customers = CUSTOMERS }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All");
   const [view, setView] = useState("table"); // table | segments
-  const filtered = CUSTOMERS.filter(c =>
+  const filtered = customers.filter(c =>
     (filter === "All" || c.risk === filter) &&
     (c.name.toLowerCase().includes(search.toLowerCase()) || c.email.toLowerCase().includes(search.toLowerCase()))
   );
@@ -919,8 +946,8 @@ function CustomersModule() {
 }
 
 // ─── Churn Module ─────────────────────────────────────────────────────────────
-function ChurnModule() {
-  const [customer, setCustomer] = useState(CUSTOMERS[0]);
+function ChurnModule({ customers = CUSTOMERS }) {
+  const [customer, setCustomer] = useState(customers[0] || CUSTOMERS[0]);
   const [aiRecs, setAiRecs] = useState(null);
   const [loadingRecs, setLoadingRecs] = useState(false);
   const [mlPrediction, setMlPrediction] = useState(null);
@@ -946,7 +973,7 @@ function ChurnModule() {
       <div>
         <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16, marginBottom: 16 }}>
           <p style={{ color: C.accent, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", margin: "0 0 12px" }}>Select Customer</p>
-          {CUSTOMERS.slice(0, 6).map(c => (
+          {customers.slice(0, 6).map(c => (
             <div key={c.id} onClick={() => { setCustomer(c); setAiRecs(null); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px", borderRadius: 8, cursor: "pointer", marginBottom: 4, background: customer.id === c.id ? "#00E5FF0D" : "transparent", border: `1px solid ${customer.id === c.id ? C.accent + "44" : "transparent"}` }}>
               <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${C.accent}33, ${C.purple}33)`, display: "flex", alignItems: "center", justifyContent: "center", color: C.accent, fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
                 {c.name.split(" ").map(w => w[0]).join("")}
@@ -1716,15 +1743,289 @@ function SettingsModule() {
   );
 }
 
+function AuthScreen() {
+  const [method, setMethod] = useState("password");
+  const [passwordMode, setPasswordMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("+91");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const resetFeedback = () => {
+    setError("");
+    setMessage("");
+  };
+
+  const friendlyAuthError = (err, fallback) => {
+    const raw = err?.message || fallback;
+    if (raw.toLowerCase().includes("unsupported phone provider")) {
+      return "Phone OTP is not enabled in Supabase yet. Enable the Phone provider and configure an SMS provider such as Twilio, MessageBird, Vonage, or TextLocal.";
+    }
+    if (raw.toLowerCase().includes("invalid login credentials")) {
+      return "Incorrect email or password. Check your details or create a new account.";
+    }
+    if (raw.toLowerCase().includes("email not confirmed")) {
+      return "Confirm your email using the link Supabase sent you, then sign in.";
+    }
+    return raw;
+  };
+
+  const submitPassword = async (event) => {
+    event.preventDefault();
+    resetFeedback();
+    setBusy(true);
+    try {
+      if (passwordMode === "signup") {
+        const data = await signUpWithPassword(email, password, fullName);
+        if (!data.session) {
+          setMessage("Account created. Check your email to confirm the account, then sign in.");
+          setPasswordMode("signin");
+        }
+      } else {
+        await signInWithPassword(email, password);
+      }
+    } catch (err) {
+      setError(friendlyAuthError(err, "Authentication failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPhone = async (event) => {
+    event.preventDefault();
+    resetFeedback();
+    setBusy(true);
+    try {
+      if (!otpSent) {
+        await signInWithPhoneOtp(phone);
+        setOtpSent(true);
+        setMessage(`OTP sent to ${phone}`);
+      } else {
+        await verifyPhoneOtp(otp, phone);
+      }
+    } catch (err) {
+      setError(friendlyAuthError(err, "OTP authentication failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputStyle = {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "#ffffff08",
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    padding: "12px 14px",
+    color: C.text,
+    fontSize: 14,
+    outline: "none",
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at 20% 10%, ${C.purple}22, transparent 35%), radial-gradient(circle at 80% 80%, ${C.accent}18, transparent 35%), ${C.bg}`, display: "grid", placeItems: "center", padding: 24, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" }}>
+      <div style={{ width: "100%", maxWidth: 430 }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ width: 54, height: 54, margin: "0 auto 12px", borderRadius: 14, background: `linear-gradient(135deg, ${C.accent}, ${C.purple})`, display: "grid", placeItems: "center", color: "#020617", fontWeight: 900, fontSize: 24 }}>V</div>
+          <h1 style={{ color: "#fff", fontSize: 24, margin: "0 0 7px" }}>VisionRetain AI</h1>
+          <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Authenticate to access your dashboard</p>
+        </div>
+
+        <div style={{ background: `${C.bgCard}F2`, border: `1px solid ${C.border}`, borderRadius: 18, padding: 24, boxShadow: "0 24px 70px rgba(0,0,0,.4)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 5, borderRadius: 11, background: "#ffffff08", marginBottom: 22 }}>
+            {[["password", "Email & Password"], ["otp", "Phone OTP"]].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => { setMethod(id); resetFeedback(); }} style={{ border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", background: method === id ? C.accent : "transparent", color: method === id ? "#001018" : C.muted, fontSize: 12, fontWeight: 700 }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {method === "password" ? (
+            <form onSubmit={submitPassword}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <div>
+                  <h2 style={{ color: "#fff", fontSize: 18, margin: "0 0 4px" }}>{passwordMode === "signup" ? "Create account" : "Welcome back"}</h2>
+                  <p style={{ color: C.muted, fontSize: 12, margin: 0 }}>{passwordMode === "signup" ? "Register using email and password" : "Sign in using your account password"}</p>
+                </div>
+              </div>
+              {passwordMode === "signup" && (
+                <input aria-label="Full name" value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Full name" required style={{ ...inputStyle, marginBottom: 12 }} />
+              )}
+              <input aria-label="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email address" autoComplete="email" required style={{ ...inputStyle, marginBottom: 12 }} />
+              <input aria-label="Password" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" autoComplete={passwordMode === "signup" ? "new-password" : "current-password"} minLength={6} required style={{ ...inputStyle, marginBottom: 14 }} />
+              <button disabled={busy} type="submit" style={{ width: "100%", border: "none", borderRadius: 10, padding: 12, background: busy ? C.muted : C.accent, color: "#001018", fontWeight: 800, cursor: busy ? "wait" : "pointer" }}>
+                {busy ? "Please wait…" : passwordMode === "signup" ? "Create account" : "Sign in"}
+              </button>
+              <button type="button" onClick={() => { setPasswordMode(mode => mode === "signin" ? "signup" : "signin"); resetFeedback(); }} style={{ width: "100%", border: "none", background: "transparent", color: C.accent, padding: "12px 0 0", cursor: "pointer", fontSize: 12 }}>
+                {passwordMode === "signup" ? "Already registered? Sign in" : "New user? Create an account"}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={submitPhone}>
+              <h2 style={{ color: "#fff", fontSize: 18, margin: "0 0 4px" }}>{otpSent ? "Enter verification code" : "Sign in with phone"}</h2>
+              <p style={{ color: C.muted, fontSize: 12, margin: "0 0 18px" }}>{otpSent ? `Enter the code sent to ${phone}` : "Use an E.164 number, for example +919876543210"}</p>
+              <input aria-label="Phone number" type="tel" value={phone} onChange={e => setPhone(e.target.value.replace(/[^\d+]/g, ""))} placeholder="+919876543210" autoComplete="tel" disabled={otpSent} required style={{ ...inputStyle, marginBottom: 12 }} />
+              {otpSent && (
+                <input aria-label="OTP code" inputMode="numeric" value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="Enter OTP" autoComplete="one-time-code" required style={{ ...inputStyle, marginBottom: 12, letterSpacing: "0.25em", textAlign: "center" }} />
+              )}
+              <button disabled={busy} type="submit" style={{ width: "100%", border: "none", borderRadius: 10, padding: 12, background: busy ? C.muted : C.accent, color: "#001018", fontWeight: 800, cursor: busy ? "wait" : "pointer" }}>
+                {busy ? "Please wait…" : otpSent ? "Verify OTP" : "Send OTP"}
+              </button>
+              {otpSent && (
+                <button type="button" onClick={() => { setOtpSent(false); setOtp(""); resetFeedback(); }} style={{ width: "100%", border: "none", background: "transparent", color: C.accent, padding: "12px 0 0", cursor: "pointer", fontSize: 12 }}>Change phone number</button>
+              )}
+            </form>
+          )}
+
+          {error && <p role="alert" style={{ color: C.danger, background: "#FF5C5C12", border: "1px solid #FF5C5C33", padding: "10px 12px", borderRadius: 8, fontSize: 12, margin: "16px 0 0" }}>{error}</p>}
+          {message && <p style={{ color: C.success, background: "#00FF8810", border: "1px solid #00FF8833", padding: "10px 12px", borderRadius: 8, fontSize: 12, margin: "16px 0 0" }}>{message}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function VisionRetainAI() {
-  const [section, setSection] = useState("landing");
+  const [section, setSection] = useState("overview");
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [customers, setCustomers] = useState(CUSTOMERS);
+  const [kpis, setKpis] = useState(KPI_DATA);
   const [notifications] = useState([
     { type: "danger", msg: "Critical: Karan Verma — 95% churn risk" },
     { type: "warning", msg: "Price drop: Sony XM5 at ₹26,999 on Amazon" },
     { type: "success", msg: "Demand forecast updated for Q3" },
   ]);
   const [showNotif, setShowNotif] = useState(false);
+  const [systemHealth, setSystemHealth] = useState({
+    backend: false,
+    vision: false,
+    prices: false,
+    supabase: false,
+  });
+  const authUser = session?.user;
+  const userName = authUser?.user_metadata?.full_name
+    || authUser?.email?.split("@")[0]
+    || authUser?.phone
+    || "User";
+  const userInitials = userName
+    .split(/\s+/)
+    .map(part => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  useEffect(() => {
+    let mounted = true;
+    let subscription;
+    getSession()
+      .then(currentSession => {
+        if (mounted) setSession(currentSession);
+      })
+      .catch(() => {
+        if (mounted) setSession(null);
+      })
+      .finally(() => {
+        if (mounted) setAuthLoading(false);
+      });
+    try {
+      const result = onAuthStateChange(nextSession => {
+        if (mounted) {
+          setSession(nextSession);
+          setAuthLoading(false);
+          if (nextSession) setSection("overview");
+        }
+      });
+      subscription = result.data.subscription;
+    } catch {
+      setAuthLoading(false);
+    }
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    let active = true;
+    fetch(`${ML_BASE_URL}/api/v1/dashboard`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(data => {
+        if (!active) return;
+        if (data.customers?.length) {
+          setCustomers(data.customers.map(customer => ({
+            ...customer,
+            spend: Number(customer.spend),
+            churn: Number(customer.churn),
+            ltv: Number(customer.ltv),
+            nps: Number(customer.nps),
+            tenure: Number(customer.tenure),
+            lastActive: customer.last_active,
+          })));
+        }
+        if (data.metrics?.length) {
+          setKpis(data.metrics.map(metric => ({
+            label: metric.label,
+            value: Number(metric.value),
+            delta: metric.delta,
+            color: metric.color,
+            icon: metric.icon,
+            format: metric.format,
+          })));
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    let active = true;
+    const checkHealth = async () => {
+      try {
+        const response = await fetch(`${ML_BASE_URL}/health`);
+        if (!response.ok) throw new Error("Backend unhealthy");
+        const data = await response.json();
+        if (active) {
+          setSystemHealth({
+            backend: true,
+            vision: Boolean(data.product_lens?.vision_configured),
+            prices: Boolean(data.product_lens?.live_prices_configured),
+            supabase: Boolean(data.product_lens?.supabase_configured),
+          });
+        }
+      } catch {
+        if (active) {
+          setSystemHealth({ backend: false, vision: false, prices: false, supabase: false });
+        }
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const allSystemsLive = systemHealth.backend && systemHealth.vision && systemHealth.prices && systemHealth.supabase;
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } finally {
+      setSession(null);
+      setSection("overview");
+    }
+  };
 
   const sectionTitles = {
     overview: "Command Center", "product-lens": "Product Lens AI", price: "Price Intelligence",
@@ -1733,32 +2034,19 @@ export default function VisionRetainAI() {
     copilot: "AI Business Copilot", reports: "Reports", settings: "Settings & Configuration"
   };
 
-  if (section === "landing") {
+  if (authLoading) {
     return (
-      <div style={{ background: C.bg, minHeight: "100vh", fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" }}>
-        <style>{`
-          @keyframes spin { to { transform: rotate(360deg); } }
-          @keyframes pulse { to { opacity: 0.3; transform: scale(0.8); } }
-          @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-        `}</style>
-        <nav style={{ padding: "16px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.border}`, background: C.bg }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${C.accent}, ${C.purple})`, display: "flex", alignItems: "center", justifyContent: "center", color: "#000", fontWeight: 900, fontSize: 16 }}>V</div>
-            <span style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>VisionRetain AI</span>
-            <span style={{ background: "#00E5FF14", color: C.accent, fontSize: 10, padding: "2px 8px", borderRadius: 8, fontWeight: 600, marginLeft: 4 }}>v2.0</span>
-          </div>
-          <div style={{ display: "flex", gap: 24 }}>
-            {["Features", "Pricing", "Docs", "Blog"].map(l => <span key={l} style={{ color: C.muted, fontSize: 14, cursor: "pointer" }}>{l}</span>)}
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setSection("overview")} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.text, borderRadius: 8, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}>Sign In</button>
-            <button onClick={() => setSection("overview")} style={{ background: C.accent, border: "none", color: "#000", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Get Started</button>
-          </div>
-        </nav>
-        <LandingPage onEnter={() => setSection("overview")} />
+      <div style={{ minHeight: "100vh", background: C.bg, display: "grid", placeItems: "center", color: C.accent, fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 42, height: 42, border: `3px solid ${C.accent}33`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin .8s linear infinite", margin: "0 auto 12px" }} />
+          <span style={{ fontSize: 13 }}>Checking your session…</span>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
       </div>
     );
   }
+
+  if (!session) return <AuthScreen />;
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", display: "flex", fontFamily: "-apple-system, BlinkMacSystemFont, 'Inter', sans-serif", color: C.text }}>
@@ -1792,10 +2080,10 @@ export default function VisionRetainAI() {
         </nav>
         <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${C.purple}, ${C.pink})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>AK</div>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${C.purple}, ${C.pink})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>{userInitials}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ color: C.text, margin: 0, fontSize: 12, fontWeight: 500 }}>Aryan Kumar</p>
-              <p style={{ color: C.muted, margin: 0, fontSize: 10 }}>Admin · Enterprise</p>
+              <p style={{ color: C.text, margin: 0, fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }}>{userName}</p>
+              <p style={{ color: C.muted, margin: 0, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis" }}>{authUser?.email || authUser?.phone}</p>
             </div>
           </div>
         </div>
@@ -1807,9 +2095,11 @@ export default function VisionRetainAI() {
         <div style={{ height: 56, background: C.bgSec, borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", flexShrink: 0 }}>
           <h2 style={{ color: "#fff", margin: 0, fontSize: 16, fontWeight: 700 }}>{sectionTitles[section] || section}</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ background: "#00FF8814", border: `1px solid ${C.success}33`, borderRadius: 20, padding: "4px 12px", display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: C.success, display: "inline-block" }} />
-              <span style={{ color: C.success, fontSize: 11, fontWeight: 600 }}>All Systems Live</span>
+            <div title={`Backend: ${systemHealth.backend ? "online" : "offline"} · Vision: ${systemHealth.vision ? "configured" : "missing key"} · Prices: ${systemHealth.prices ? "configured" : "missing key"} · Supabase: ${systemHealth.supabase ? "configured" : "offline"}`} style={{ background: allSystemsLive ? "#00FF8814" : "#FFC85714", border: `1px solid ${allSystemsLive ? C.success : C.warning}33`, borderRadius: 20, padding: "4px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: allSystemsLive ? C.success : C.warning, display: "inline-block" }} />
+              <span style={{ color: allSystemsLive ? C.success : C.warning, fontSize: 11, fontWeight: 600 }}>
+                {allSystemsLive ? "All Systems Live" : systemHealth.backend ? "Setup Required" : "Backend Offline"}
+              </span>
             </div>
             <div style={{ position: "relative" }}>
               <button onClick={() => setShowNotif(!showNotif)} style={{ background: "#ffffff08", border: `1px solid ${C.border}`, borderRadius: 8, width: 34, height: 34, cursor: "pointer", color: C.text, fontSize: 14 }}>🔔</button>
@@ -1825,7 +2115,7 @@ export default function VisionRetainAI() {
                 </div>
               )}
             </div>
-            <button onClick={() => setSection("landing")} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 12px", color: C.muted, fontSize: 12, cursor: "pointer" }}>◈ Home</button>
+            <button onClick={handleSignOut} style={{ background: "transparent", border: `1px solid ${C.border}`, borderRadius: 8, padding: "5px 12px", color: C.muted, fontSize: 12, cursor: "pointer" }}>Sign out</button>
           </div>
         </div>
 
@@ -1852,7 +2142,7 @@ export default function VisionRetainAI() {
           {section === "overview" && (
             <div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
-                {KPI_DATA.map((k, i) => <KPICard key={i} {...k} active={true} />)}
+                {kpis.map((k, i) => <KPICard key={i} {...k} active={true} />)}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 18 }}>
                 <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 20 }}>
@@ -1912,7 +2202,7 @@ export default function VisionRetainAI() {
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <tbody>
-                    {CUSTOMERS.filter(c => c.risk === "Critical" || c.risk === "High").slice(0, 4).map(c => (
+                    {customers.filter(c => c.risk === "Critical" || c.risk === "High").slice(0, 4).map(c => (
                       <tr key={c.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                         <td style={{ padding: "10px 20px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1937,8 +2227,8 @@ export default function VisionRetainAI() {
           )}
 
           {section === "product-lens" && <ProductLensModule />}
-          {section === "customers" && <CustomersModule />}
-          {section === "churn" && <ChurnModule />}
+          {section === "customers" && <CustomersModule customers={customers} />}
+          {section === "churn" && <ChurnModule customers={customers} />}
           {section === "sentiment" && <SentimentModule />}
           {section === "revenue" && <RevenueModule />}
           {section === "copilot" && <CopilotModule />}
