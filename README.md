@@ -318,3 +318,4 @@ MIT License — Free for personal use, hackathons, portfolios, and internship de
 ---
 
 *Built with ❤️ using Claude AI · VisionRetain AI v2.0 · 2026*
+# VisionRetain-AI
